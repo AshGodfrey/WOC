@@ -37,7 +37,10 @@ def check_cache(key):
 # Check if the key exists in the cache
   if redis_client.exists(key):
     # Retrieve all values from the Hashmap
-    return redis_client.hgetall(key)
+    try: 
+      return redis_client.hgetall(key)
+    except:
+      return redis_client.get(key)
   else:
     # Cache miss
     return False
