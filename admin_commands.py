@@ -8,6 +8,7 @@ import json
 import discord.utils
 from discord.ext import commands
 import re
+import datetime
 
 intents = discord.Intents.all()
 intents.members = True
@@ -224,6 +225,219 @@ async def handle_delete_player(message):
 async def handle_check_cache (message):
    await message.channel.send(db["276839441304125440"])
 
+
+
+async def handle_check_inactive_players(message):
+  await message.channel.send("Gathering inactive character details…")
+  
+  now    = datetime.datetime.utcnow()
+  cutoff = now - datetime.timedelta(days=14)
+  
+  lines = []
+  for char_name in db.keys():
+      # 1) Grab DB entry & normalize player ID
+      try:
+          entry   = db[char_name]
+          raw_pid = entry['player']
+      except (KeyError, TypeError):
+          continue
+  
+      pid_str = "".join(re.findall(r"\d+", str(raw_pid)))
+      if not pid_str:
+          continue
+      pid_int = int(pid_str)
+  
+      # 2) Resolve member or user for “PlayerDisplay”
+      try:
+          member = await message.guild.fetch_member(pid_int)
+      except discord.NotFound:
+          continue  # left the server
+      except discord.Forbidden:
+          member = None
+  
+      # skip Ashe
+      if member and member.name.lower() == "ashe":
+          continue
+  
+      if member:
+          player_display = f"{member.display_name} ({member.name}#{member.discriminator})"
+      else:
+          try:
+              user = await message.client.fetch_user(pid_int)
+              if user.name.lower() == "ashe":
+                  continue
+              player_display = f"{user.name}#{user.discriminator} (LEFT SERVER)"
+          except:
+              continue
+  
+      # 3) Parse last_post_date
+      raw_date = entry.get('last_post_date')
+      dt = None
+      if raw_date:
+          s = str(raw_date).strip()
+          try:
+              dt = datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+          except ValueError:
+              try:
+                  dt = datetime.datetime.fromisoformat(s)
+              except:
+                  dt = None
+  
+      # 4) If inactive, record line
+      if not dt or dt < cutoff:
+          date_str = dt.strftime("%Y-%m-%d") if dt else "no posts recorded"
+          link     = entry.get('last_post_link') or ""
+          lines.append(
+              f"{player_display} – {char_name} – {date_str}"
+              + (f" – {link}" if link else "")
+          )
+  
+  if not lines:
+      return await message.channel.send("No inactive characters to report.")
+  
+  # 5) Send in 2000‑char chunks
+  buffer = ""
+  for line in lines:
+      chunk = f"{buffer}\n{line}" if buffer else line
+      if len(chunk) > 2000:
+          await message.channel.send(buffer)
+          buffer = line
+      else:
+          buffer = chunk
+  if buffer:
+      await message.channel.send(buffer)
+
+
+async def handle_inactive_details(message):
+    await message.channel.send("Building character activity embeds… this may take a moment.")
+    now      = datetime.datetime.utcnow()
+    cutoff   = now - datetime.timedelta(days=14)
+    ashe_id  = 484491528128167955
+
+    # 1) Group characters by normalized player ID
+    players_chars = {}
+    for char_name in db.keys():
+        try:
+            entry   = db[char_name]
+            raw_pid = entry['player']
+        except (KeyError, TypeError):
+            continue
+
+        pid = "".join(re.findall(r"\d+", str(raw_pid)))
+        if not pid:
+            continue
+        players_chars.setdefault(pid, []).append(char_name)
+
+    # 2) Iterate players
+    for pid_str, chars in players_chars.items():
+        pid_int = int(pid_str)
+        if pid_int == ashe_id:
+            continue  # skip Ashe
+
+        member = None
+        user = None
+        note = ""
+
+        # a) Try fetching as a guild member
+        try:
+            member = await message.guild.fetch_member(pid_int)
+        except discord.NotFound:
+            note = "(left server)"
+        except discord.Forbidden:
+            note = "(missing permissions)"
+
+        # b) Fallback to global user if member not available
+        if not member:
+            try:
+                user = await message.client.fetch_user(pid_int)
+            except:
+                user = None
+
+        # c) Build display info
+        if member:
+            display    = f"{member.display_name} ({member.name}#{member.discriminator})"
+            avatar_url = member.display_avatar.url
+        elif user:
+            display    = f"{user.name}#{user.discriminator} {note}"
+            avatar_url = user.avatar.url if user.avatar else None
+        else:
+            display    = f"User ID {pid_int} {note or '(could not fetch user)'}"
+            avatar_url = None
+
+        # d) Partition characters
+        active   = []
+        inactive = []
+        for char in chars:
+            entry    = db[char]
+            raw_date = entry.get('last_post_date')
+            dt       = None
+            if raw_date:
+                s = str(raw_date).strip()
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        dt = datetime.datetime.strptime(s, fmt)
+                        break
+                    except ValueError:
+                        dt = None
+                if not dt:
+                    try:
+                        dt = datetime.datetime.fromisoformat(s)
+                    except:
+                        dt = None
+
+            name_titled = char.title()
+            if dt and dt >= cutoff:
+                active.append((name_titled, dt.strftime("%Y-%m-%d")))
+            else:
+                if dt:
+                    inactive.append(f"{name_titled} ({dt.strftime('%Y-%m-%d')})")
+                else:
+                    inactive.append(name_titled)
+
+
+        # e) Embed color
+        color = discord.Color.red() if not active else discord.Color.green()
+        embed = discord.Embed(color=color)
+
+        # f) Author with avatar or fallback
+        if avatar_url:
+            embed.set_author(name=display, icon_url=avatar_url)
+        else:
+            embed.set_author(name=display)
+
+        # g) Active characters
+        if active:
+            embed.add_field(
+                name="🟢 Active Characters",
+                value="\n".join(f"• **{n}** — {d}" for n, d in active),
+                inline=False
+            )
+
+        # h) Inactive characters
+        val = ", ".join(inactive)
+        if len(val) > 1024:
+            embed.add_field(
+                name="⚪️ Inactive Characters",
+                value="Too many inactive characters to display.",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="⚪️ Inactive Characters",
+                value=val,
+                inline=False
+            )
+
+        # i) Send embed
+        try:
+            await message.channel.send(embed=embed)
+        except discord.HTTPException:
+            await message.channel.send(f"{display} too long for discord")
+
+    await message.channel.send("Report complete! 🚀")
+
+
+
 #all admin commands:
 command_list = {
   '!delete-character': handle_delete_character,
@@ -245,6 +459,8 @@ command_list = {
   '!send-message': send_message_to_channel,
   '!raw-character': get_raw_character_info,
   '!get-character-list': get_user_characters,
+  '!check-posts': handle_check_inactive_players,
+  '!inactive-details': handle_inactive_details
 }
 
 

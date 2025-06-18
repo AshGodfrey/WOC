@@ -38,7 +38,6 @@ def tag_player(posters):
       return f"Error: {e}"
 
 
-
 def create_tag_embed(data):
   embed = discord.Embed(title=data['title'], url=data['link'], colour=0x8499B1)
   embed.set_thumbnail(url=data['img_url'])
@@ -54,7 +53,7 @@ def create_special_embed(data):
   embed.add_field(name="Posted By", value=data['poster'].title(), inline=False)
   embed.add_field(name="Looking For", value=data['looking_for'].title(), inline=False)
   return embed
-  
+
 def get_thread_id(url):
   array = url.split("=")
   smaller = array[2].split('&')
@@ -87,9 +86,8 @@ async def handle_tags(client, channel):
   do_nothing = False
   reasons = ""
 
-  #get most recent post
-  soup = helpers.soup(
-    "https://windsofchangerp.jcink.net/index.php?act=Search&CODE=getactive")
+  # Get most recent post
+  soup = helpers.soup("https://windsofchangerp.jcink.net/index.php?act=Search&CODE=getactive")
   posts = soup.find("div", {"id": "active-topics"})
   last_topic = (posts.find_all('tr'))[1]
   last_poster_wrapper = (last_topic.find_all("td", {"class": "row2"}))[-1]
@@ -104,13 +102,13 @@ async def handle_tags(client, channel):
 
   posted_at = last_poster_wrapper.find(text=True, recursive=False).strip()
 
-  #check if in not-applicable forums
+  # Check if in not-applicable forums
   forum = last_topic.find_all("td", {"class": "row4"})[-2].text.lower().strip()
-  if forum == "A-M Members" or forum == "N-Z Members":
+  if forum == "a-m members" or forum == "n-z members":
     do_nothing = True
     reasons = reasons + "Not a posting forum. Forum: " + forum
 
-  #check if posted today then check if posted in past minute
+  # Check if posted today then check if posted in past minute
   if posted_at.startswith("Today"):
     do_nothing = check_time(posted_at)
     reasons = reasons + "Out of acceptable time range. "
@@ -118,29 +116,25 @@ async def handle_tags(client, channel):
     do_nothing = True
     reasons = reasons + "Out of acceptable time range. "
 
-  #check if posted by a character
+  # Check if posted by a character
   db_character = db[last_poster]
   if not db_character:
     do_nothing = True
     reasons = reasons + "Poster not a character: " + last_poster + "."
 
-  #check if cached as last
+  # Check if cached as last
   try:
-    cached_post = helpers.check_cache('post:' + thread.text.title() +
-                                      last_poster + str(replies))
+    cached_post = helpers.check_cache('post:' + thread.text.title() + last_poster + str(replies))
     if cached_post:
       do_nothing = True
       reasons = reasons + "This post was cached. "
   except:
-    await helpers.send_message(
-      client, 1125111458020196443,
-      "Error accessing Redis key: " +
-      ('post:' + thread.text.title() + last_poster + str(replies)))
+    await helpers.send_message(client, 1125111458020196443,
+                               "Error accessing Redis key: " + ('post:' + thread.text.title() + last_poster + str(replies)))
 
   if do_nothing:
-    await helpers.send_message(
-      client, 1125111458020196443,
-      "Doing nothing with this post, reasons: " + reasons)
+    await helpers.send_message(client, 1125111458020196443,
+                               "Doing nothing with this post, reasons: " + reasons)
     return 
 
   # Mapping of forum types to channel IDs
@@ -158,7 +152,7 @@ async def handle_tags(client, channel):
   if forum in forum_to_channel:
       character_data = helpers.check_cache('character:' + last_poster)
 
-      # Cache miss
+      # Cache miss: fetch character data and cache it
       if not character_data: 
           db_character = db[last_poster]
           soup = helpers.soup(db_character['profile'])
@@ -175,7 +169,7 @@ async def handle_tags(client, channel):
               'player_name': player.name,
               'player_avatar': str(player.avatar.url),
               'player_id': player.id,
-              'profile_url': db_character['profile'],  # Adjusted to use the DB value for the profile URL
+              'profile_url': db_character['profile'],
           }
           helpers.write_to_cache(cache_key, data)
           character_data = data
@@ -184,11 +178,11 @@ async def handle_tags(client, channel):
           converted_data = helpers.convert_to_strings(character_data)
           image = converted_data['img_url']
 
-      # Assuming subtitle/summary is in a <span class="desc"> element
+      # Get description from <span class="desc">
       raw_desc = ""
       for desc in (last_topic).findAll('span', {'class': 'desc'}):
         raw_desc = desc.text.lower()
-     
+
       data = {
           'title': thread.text.title(),
           'img_url': image,
@@ -197,23 +191,29 @@ async def handle_tags(client, channel):
           'link': thread.find('a')['href'],
       }
 
-
-      # New topics
+      # New topics: update DB and write to cache before sending embed
       if replies == 0:
-          # Key for the Hashmap
-        cache_key = 'post:' + thread.text.title() + last_poster + str(replies)
-        # Set key-value pairs in bulk using hmset()
-        helpers.write_to_cache_expires(cache_key, "", 86400)
-  
-        embed = create_special_embed(data)
-        channel = forum_to_channel[forum]
-        await helpers.send_embed(client, channel, embed)
-        return
-        
+          cache_key = 'post:' + thread.text.title() + last_poster + str(replies)
+          helpers.write_to_cache_expires(cache_key, "", 86400)
+
+          try:
+              record = db[last_poster]
+              record["last_post"] = {
+                  "date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                  "link": thread.find('a')['href']
+              }
+              db[last_poster] = record
+          except Exception as e:
+              print("Error updating last_post:", e)
+
+          embed = create_special_embed(data)
+          channel = forum_to_channel[forum]
+          await helpers.send_embed(client, channel, embed)
+          return
+
   else:
-    #check cache
+    # Process normal tag embed branch
     character_data = helpers.check_cache('character:' + last_poster)
-    #cache miss
     if not character_data: 
       db_character = db[last_poster]
       soup = helpers.soup(db_character['profile'])
@@ -230,7 +230,7 @@ async def handle_tags(client, channel):
             'player_name': player.name,
             'player_avatar': str(player.avatar.url),
             'player_id': player.id,
-            'profile_url': db_character['profile'],  # Adjusted to use the DB value for the profile URL
+            'profile_url': db_character['profile'],
         }
       helpers.write_to_cache(cache_key, data)
       character_data = data
@@ -238,26 +238,25 @@ async def handle_tags(client, channel):
     if character_data: 
       converted_data = helpers.convert_to_strings(character_data)
     image = converted_data['img_url']
-    #raw_desc = (last_topic).find_all('td')[2].find('span').text.lower()
+
+    # Get description text
     for desc in (last_topic).findAll('span', {'class': 'desc'}):
       raw_desc = desc.text.lower()
     posted_for = raw_desc.split(", ")
     topic_starter = ((last_topic).find_all('td')[-4].find('a').text).lower()
     posted_for.append(topic_starter)
 
-    #get participants without current poster
+    # Remove the current poster from the list, if present
     try:
       posted_for.remove(last_poster)
-    except:
-      print("error")
+    except Exception as e:
+      print("Error removing last_poster from posted_for:", e)
 
-    #new topics
-    if (replies == 0):
+    if replies == 0:
       tag = tag_player(posted_for)
-    #reply
     else:
-      #if the last poster isn't who it's posted for:
-      if (last_poster != topic_starter):
+      # If reply and last poster isn't the topic starter, tag appropriately
+      if last_poster != topic_starter:
         tag = tag_player(posted_for)
       else:
         tag = tag_player(posted_for)
@@ -270,10 +269,16 @@ async def handle_tags(client, channel):
       'link': thread.find('a')['href'],
     }
 
-    #write to cache
-    # Key for the Hashmap
+    # Update the player's record with last_post details and write to cache
+    try:
+      record = db[last_poster]
+      record["last_post_date"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+      record["last_post_link"] = thread.find('a')['href']
+      db[last_poster] = record
+    except Exception as e:
+        print("Error updating last_post:", e)
+
     cache_key = 'post:' + thread.text.title() + last_poster + str(replies)
-    # Set key-value pairs in bulk using hmset()
     helpers.write_to_cache_expires(cache_key, "", 86400)
 
     await helpers.send_message(client, channel, tag)
