@@ -16,48 +16,86 @@ def update_character(character, player, profile):
     db[character] = {'player': player, 'profile': profile}
     return 'character added'
 
-def character_embed(cache_key, data):
-  try: 
-    rgb = db["color"][data['character_class']]
-    rgbArray = rgb.split(",")
-    r = int(rgbArray[0])
-    g = int(rgbArray[1])
-    b = int(rgbArray[2])
-  except:  
-    r = 0
-    g = 0
-    b = 0
-  
-  hooks = json.loads(data['hooks'])
-  embed = discord.Embed(title=data['station'] + ' ' + cache_key.title() +', ' + data['moniker'], url=data['profile_url'],  colour=discord.Color.from_rgb(r, g, b))
-  embed.set_thumbnail(url=data['img_url'])
-  embed.set_author(name=data['player_name'], icon_url= data['player_avatar'])
-  embed.add_field(name="Age", value=data['age'], inline=True)
-  embed.add_field(name="Region", value=data['region'], inline=True)
-  for hook in hooks:
-    soup = BeautifulSoup(hook, features='html.parser')
-    subtitle = soup.find('subtitle').text
-    div = soup.find('div', class_='blockquote3').text
-    if len(div) > 900: 
-      embed.add_field(name=subtitle, value="Please view in my profile.", inline=False)
-    else:
-      embed.add_field(name=subtitle, value=div, inline=False)
-  return embed
 
-def mini_embed(cache_key, data):
-  try: 
-    rgb = db["color"][data['character_class']]
-    rgbArray = rgb.split(",")
-    r = int(rgbArray[0])
-    g = int(rgbArray[1])
-    b = int(rgbArray[2])
-  except:  
-    r = 0
-    g = 0
-    b = 0
 
-  embed = discord.Embed(title=cache_key.title() +', ' + data['moniker'], url=data['profile_url'],  colour=discord.Color.from_rgb(r, g, b))
-  embed.set_thumbnail(url=data['img_url'])
-  embed.add_field(name="Age", value=data['age'], inline=True)
-  embed.add_field(name="Region", value=data['region'], inline=True)
-  return embed
+# characters.py
+import discord
+import json
+from bs4 import BeautifulSoup
+from replit import db
+
+
+def character_embed(cache_key: str, data: dict) -> discord.Embed:
+    """
+    Create a rich Embed for a character, using safe lookups for hooks.
+    """
+    # Determine color
+    try:
+        rgb = db['color'].get(data.get('character_class'), '0,0,0')
+        r, g, b = (int(c) for c in rgb.split(','))
+    except Exception:
+        r = g = b = 0
+
+    # Build title and embed
+    title = f"{data.get('station', '')} {cache_key.title()}, {data.get('moniker', '')}".strip(', ')
+    embed = discord.Embed(title=title,
+                          url=data.get('profile_url'),
+                          colour=discord.Color.from_rgb(r, g, b))
+    if data.get('img_url'):
+        embed.set_thumbnail(url=data['img_url'])
+    embed.set_author(name=data.get('player_name', 'Unknown'),
+                     icon_url=data.get('player_avatar'))
+
+    # Core stats
+    embed.add_field(name='Age', value=data.get('age', 'N/A'), inline=True)
+    embed.add_field(name='Region', value=data.get('region', 'N/A'), inline=True)
+
+    # Parse hooks safely
+    raw_hooks = []
+    try:
+        raw_hooks = json.loads(data.get('hooks') or '[]')
+    except json.JSONDecodeError:
+        raw_hooks = []
+
+    for raw in raw_hooks:
+        soup = BeautifulSoup(raw, 'html.parser')
+        subtitle_node = soup.find('subtitle')
+        block_node = soup.find('div', class_='blockquote3')
+
+        subtitle = subtitle_node.get_text(strip=True) if subtitle_node else None
+        text = block_node.get_text(strip=True) if block_node else None
+
+        # If the hook is just an empty placeholder, skip it
+        if not subtitle or not text:
+            continue
+
+        # Truncate overly long content
+        if len(text) > 900:
+            text = 'Please view in my profile.'
+
+        embed.add_field(name=subtitle, value=text, inline=False)
+
+    return embed
+
+
+def mini_embed(cache_key: str, data: dict) -> discord.Embed:
+    """
+    Create a compact Embed for menu displays.
+    """
+    # Determine color
+    try:
+        rgb = db['color'].get(data.get('character_class'), '0,0,0')
+        r, g, b = (int(c) for c in rgb.split(','))
+    except Exception:
+        r = g = b = 0
+
+    title = f"{cache_key.title()}, {data.get('moniker', '')}".strip(', ')
+    embed = discord.Embed(title=title,
+                          url=data.get('profile_url'),
+                          colour=discord.Color.from_rgb(r, g, b))
+    if data.get('img_url'):
+        embed.set_thumbnail(url=data['img_url'])
+
+    embed.add_field(name='Age', value=data.get('age', 'N/A'), inline=True)
+    embed.add_field(name='Region', value=data.get('region', 'N/A'), inline=True)
+    return embed
