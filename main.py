@@ -51,6 +51,11 @@ def build_character_data(soup, author, content_url):
     # Use centralized parsing function
     parsed_data = helpers.parse_character_from_soup(soup)
     
+    print(f"=== BUILD CHARACTER DATA DEBUG ===")
+    print(f"Parsed age from soup: '{parsed_data.get('age', 'N/A')}'")
+    print(f"Parsed region: '{parsed_data.get('region', 'N/A')}'")
+    print("==================================")
+    
     return {
         **parsed_data,
         'player_name': author.name if author else "Unknown",
