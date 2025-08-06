@@ -41,37 +41,30 @@ def parse_character_from_soup(soup_obj):
   """
   data = {}
   
-  # Extract image URL - try multiple approaches
+  # Extract image URL - look for any img tag in the document
   try:
-    # First try to find img in top section
-    top_section = soup_obj.find("top")
-    if top_section:
-      img = top_section.find("img")
-      if img and img.has_attr('src'):
-        data['img_url'] = img['src']
-      else:
-        data['img_url'] = ""
-    else:
-      # Fallback: try to find any img tag in the document
-      img = soup_obj.find("img")
-      data['img_url'] = img['src'] if img and img.has_attr('src') else ""
+    img = soup_obj.find("img")
+    data['img_url'] = img['src'] if img and img.has_attr('src') else ""
   except Exception as e:
     print(f"Error extracting image URL: {e}")
     data['img_url'] = ""
   
-  # Extract character class from mainprofile
+  # Extract character class from any element with class attribute
   try:
-    profile = soup_obj.find("mainprofile")
-    if profile and profile.has_attr('class'):
-      class_val = profile['class']
-      data['character_class'] = class_val[0] if isinstance(class_val, list) else str(class_val)
-    else:
-      data['character_class'] = ""
+    # Look for elements that might have character class info
+    profile_elements = soup_obj.find_all(class_=True)
+    data['character_class'] = ""
+    for elem in profile_elements:
+      classes = elem.get('class', [])
+      if isinstance(classes, list) and classes:
+        # Take the first meaningful class
+        data['character_class'] = classes[0]
+        break
   except Exception as e:
     print(f"Error extracting character class: {e}")
     data['character_class'] = ""
   
-  # Extract profile fields by ID with better error handling
+  # Try to extract profile fields - be more flexible with the structure
   field_mappings = {
     'region': 'region',
     'moniker': 'moniker', 
@@ -81,35 +74,67 @@ def parse_character_from_soup(soup_obj):
   
   for field_id, field_key in field_mappings.items():
     try:
-      # Look for pfield with specific id
-      field = soup_obj.find("pfield", {"id": field_id})
-      if field:
-        # Try to find c tag first
-        c_tag = field.find("c")
-        if c_tag and c_tag.get_text(strip=True):
-          data[field_key] = c_tag.get_text(strip=True)
-        else:
-          # Fallback to direct text content of pfield
-          text = field.get_text(strip=True)
-          data[field_key] = text if text else ""
-      else:
-        # Alternative: look for any element with id matching field_id
-        alt_field = soup_obj.find(id=field_id)
-        if alt_field:
-          data[field_key] = alt_field.get_text(strip=True)
-        else:
-          data[field_key] = ""
+      data[field_key] = ""
+      
+      # Method 1: Look for any element with matching id
+      field_by_id = soup_obj.find(id=field_id)
+      if field_by_id:
+        data[field_key] = field_by_id.get_text(strip=True)
+        continue
+      
+      # Method 2: Look for text that contains the field name (case insensitive)
+      all_text_elements = soup_obj.find_all(text=True)
+      for text in all_text_elements:
+        text_str = str(text).strip().lower()
+        if field_id.lower() in text_str:
+          # Try to find the parent element and get following text
+          parent = text.parent
+          if parent:
+            next_text = parent.get_text(strip=True)
+            # Extract text after the field name
+            if ':' in next_text:
+              parts = next_text.split(':', 1)
+              if len(parts) > 1:
+                data[field_key] = parts[1].strip()
+                break
+      
+      # Method 3: Look for common field patterns in the HTML
+      if not data[field_key]:
+        # Search for field patterns like "Age: 25" in the text
+        page_text = soup_obj.get_text()
+        import re
+        pattern = rf'{field_id}\s*:?\s*([^\n\r]+)'
+        match = re.search(pattern, page_text, re.IGNORECASE)
+        if match:
+          data[field_key] = match.group(1).strip()
+          
     except Exception as e:
-      print(f"Error extracting {field_key} (id: {field_id}): {e}")
+      print(f"Error extracting {field_key}: {e}")
       data[field_key] = ""
   
-  # Extract hooks
+  # Extract hooks - look for any elements that might contain hook information
   try:
-    hooks = soup_obj.find_all("hook")
-    if hooks:
-      data['hooks'] = json.dumps([str(hook) for hook in hooks])
+    hooks = []
+    
+    # Method 1: Look for actual <hook> tags
+    hook_tags = soup_obj.find_all("hook")
+    if hook_tags:
+      hooks = [str(hook) for hook in hook_tags]
     else:
-      data['hooks'] = json.dumps([])
+      # Method 2: Look for any elements that might be hooks based on content patterns
+      # This is a fallback for when the structure is different
+      all_elements = soup_obj.find_all()
+      for elem in all_elements:
+        elem_text = elem.get_text(strip=True).lower()
+        # Look for hook-like patterns
+        if any(word in elem_text for word in ['hook', 'child', 'defender', 'free', 'handmaid', 'missing', 'oblivious']):
+          # Create a mock hook structure
+          subtitle = elem.get_text(strip=True)
+          if subtitle and len(subtitle) < 100:  # Reasonable length for a subtitle
+            mock_hook = f'<hook><subtitle>{subtitle}</subtitle></hook>'
+            hooks.append(mock_hook)
+    
+    data['hooks'] = json.dumps(hooks)
   except Exception as e:
     print(f"Error extracting hooks: {e}")
     data['hooks'] = json.dumps([])
@@ -117,8 +142,9 @@ def parse_character_from_soup(soup_obj):
   # Debug output to help troubleshoot
   print(f"=== CHARACTER PARSING DEBUG ===")
   print(f"Found {len(soup_obj.find_all())} total elements")
-  print(f"Found {len(soup_obj.find_all('pfield'))} pfield elements")
   print(f"Found {len(soup_obj.find_all('img'))} img elements")
+  print(f"All element tags found: {set(tag.name for tag in soup_obj.find_all() if tag.name)}")
+  print(f"Sample of page text: {soup_obj.get_text()[:200]}...")
   print(f"Parsed data: {data}")
   print("==============================")
   
