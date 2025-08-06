@@ -197,6 +197,13 @@ async def handle_character(message):
     print(f"Cache key: '{cache_key}'")
     print(f"Cache hit: {character_data is not None}")
     
+    # Debug: Check if there are any similar cache keys
+    import helpers
+    all_keys = [key.decode() if isinstance(key, bytes) else key for key in helpers.redis_client.keys("character:*")]
+    print(f"All character cache keys: {all_keys}")
+    matching_keys = [key for key in all_keys if character.lower() in key.lower()]
+    print(f"Keys containing '{character}': {matching_keys}")
+    
     if character_data:
         converted_data = helpers.convert_to_strings(character_data)
         print(f"CHARACTER COMMAND - Using cached data for age: '{converted_data.get('age', 'N/A')}'")
