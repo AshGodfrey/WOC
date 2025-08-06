@@ -122,9 +122,11 @@ def parse_character_from_soup(soup_obj):
         # Look for age patterns and extract just the number
         age_patterns = [
           r'years\s+of\s+age\s*(\d+)',   # "years of age 26"
-          r'(?:age|years)\D*(\d+)',      # "age26", "years26", etc - any non-digit chars between
+          r'years\s+of\s+(\d+)',         # "years of 26"
+          r'age\s*(\d+)',                # "age 26"
           r'(\d+)\s+years?\s+of\s+age',  # "26 years of age"
           r'(\d+)\s+years?',             # "26 years"
+          r'(?:age|years).*?(\d+)',      # fallback: age/years followed by any chars then number
         ]
         
         for age_pattern in age_patterns:
