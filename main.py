@@ -302,22 +302,59 @@ async def handle_activity(message):
 
 async def handle_update(message):
     character = characters.get_character_name(message.content)
-    helpers.delete_cache('character:' + character)
+    print(f"=== UPDATE COMMAND DEBUG ===")
+    print(f"Character to update: '{character}'")
+    
+    cache_key = 'character:' + character
+    print(f"Cache key: '{cache_key}'")
+    
+    # Check what's currently in cache before deletion
+    old_cache_data = helpers.check_cache(cache_key)
+    print(f"Cache data before deletion: {old_cache_data is not None}")
+    if old_cache_data:
+        converted_old = helpers.convert_to_strings(old_cache_data)
+        print(f"Old cache sample: img_url='{converted_old.get('img_url', 'N/A')}', age='{converted_old.get('age', 'N/A')}', region='{converted_old.get('region', 'N/A')}'")
+    
+    helpers.delete_cache(cache_key)
+    print(f"Cache deleted for: {cache_key}")
     
     # Rebuild the cache with fresh data
     try:
+        if character not in db:
+            await message.channel.send(f"Character '{character}' not found in database")
+            print(f"Character '{character}' not found in database")
+            return
+            
         db_character = db[character]
-        soup = helpers.soup(db_character['profile'])
-        cache_key = 'character:' + character
+        print(f"DB character data: {db_character}")
+        
+        profile_url = db_character['profile']
+        print(f"Fetching profile from: {profile_url}")
+        
+        soup = helpers.soup(profile_url)
+        print(f"Soup fetched successfully, length: {len(str(soup))}")
         
         try:
             player = await client.fetch_user(db_character['player'])
+            print(f"Player fetched: {player.name} (ID: {player.id})")
             data = build_character_data(soup, player, db_character['profile'])
-        except:
+        except Exception as e:
+            print(f"Error fetching player: {e}")
             data = build_character_data(soup, None, db_character['profile'])
             data['player_name'] = "Unknown Player"
         
+        print(f"Character data built: {data}")
+        
         helpers.write_to_cache(cache_key, data)
+        print(f"Data written to cache with key: {cache_key}")
+        
+        # Verify cache was written
+        new_cache_data = helpers.check_cache(cache_key)
+        print(f"Cache verification after write: {new_cache_data is not None}")
+        if new_cache_data:
+            converted_new = helpers.convert_to_strings(new_cache_data)
+            print(f"New cache sample: img_url='{converted_new.get('img_url', 'N/A')}', age='{converted_new.get('age', 'N/A')}', region='{converted_new.get('region', 'N/A')}'")
+        
         await message.channel.send(f'Updated: {character}')
         
         # Send the updated embed to verify it worked
@@ -325,7 +362,12 @@ async def handle_update(message):
         await helpers.send_embed(client, message.channel.id, embed)
         
     except Exception as e:
+        print(f"Error in handle_update: {str(e)}")
+        import traceback
+        traceback.print_exc()
         await message.channel.send(f'Error updating {character}: {str(e)}')
+    
+    print("==============================")
 
 async def handle_choose_key(message):
     key = message.content.split('!choose-')[1].strip()
