@@ -278,7 +278,29 @@ async def handle_activity(message):
 async def handle_update(message):
     character = characters.get_character_name(message.content)
     helpers.delete_cache('character:' + character)
-    await message.channel.send('Updated: ' + character)
+    
+    # Rebuild the cache with fresh data
+    try:
+        db_character = db[character]
+        soup = helpers.soup(db_character['profile'])
+        cache_key = 'character:' + character
+        
+        try:
+            player = await client.fetch_user(db_character['player'])
+            data = build_character_data(soup, player, db_character['profile'])
+        except:
+            data = build_character_data(soup, None, db_character['profile'])
+            data['player_name'] = "Unknown Player"
+        
+        helpers.write_to_cache(cache_key, data)
+        await message.channel.send(f'Updated: {character}')
+        
+        # Send the updated embed to verify it worked
+        embed = characters.character_embed(character, data)
+        await helpers.send_embed(client, message.channel.id, embed)
+        
+    except Exception as e:
+        await message.channel.send(f'Error updating {character}: {str(e)}')
 
 async def handle_choose_key(message):
     key = message.content.split('!choose-')[1].strip()

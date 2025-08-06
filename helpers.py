@@ -48,15 +48,22 @@ def parse_character_from_soup(soup_obj):
       img = top_section.find("img")
       data['img_url'] = img['src'] if img and img.has_attr('src') else ""
     else:
-      data['img_url'] = ""
-  except:
+      # Fallback: try to find any img tag in the document
+      img = soup_obj.find("img")
+      data['img_url'] = img['src'] if img and img.has_attr('src') else ""
+  except Exception as e:
+    print(f"Error extracting image URL: {e}")
     data['img_url'] = ""
   
   # Extract character class from mainprofile
   try:
     profile = soup_obj.find("mainprofile")
-    data['character_class'] = profile['class'][0] if profile and profile.has_attr('class') else ""
-  except:
+    if profile and profile.has_attr('class'):
+      data['character_class'] = profile['class'][0] if isinstance(profile['class'], list) else profile['class']
+    else:
+      data['character_class'] = ""
+  except Exception as e:
+    print(f"Error extracting character class: {e}")
     data['character_class'] = ""
   
   # Extract profile fields by ID
@@ -72,18 +79,27 @@ def parse_character_from_soup(soup_obj):
       field = soup_obj.find("pfield", {"id": field_id})
       if field:
         c_tag = field.find("c")
-        data[field_key] = c_tag.text.strip() if c_tag else ""
+        if c_tag:
+          data[field_key] = c_tag.text.strip()
+        else:
+          # Fallback: get direct text content
+          data[field_key] = field.get_text(strip=True)
       else:
         data[field_key] = ""
-    except:
+    except Exception as e:
+      print(f"Error extracting {field_key}: {e}")
       data[field_key] = ""
   
   # Extract hooks
   try:
     hooks = soup_obj.find_all("hook")
     data['hooks'] = json.dumps([str(hook) for hook in hooks])
-  except:
+  except Exception as e:
+    print(f"Error extracting hooks: {e}")
     data['hooks'] = json.dumps([])
+  
+  # Debug output
+  print(f"Parsed character data: {data}")
   
   return data
 
