@@ -320,8 +320,13 @@ async def handle_update(message):
         converted_old = helpers.convert_to_strings(old_cache_data)
         print(f"Old cache sample: img_url='{converted_old.get('img_url', 'N/A')}', age='{converted_old.get('age', 'N/A')}', region='{converted_old.get('region', 'N/A')}'")
     
+    # Force delete cache and verify it's gone
     helpers.delete_cache(cache_key)
     print(f"Cache deleted for: {cache_key}")
+    
+    # Double-check cache is actually empty
+    verify_empty = helpers.check_cache(cache_key)
+    print(f"Cache verification after delete (should be False): {verify_empty}")
     
     # Rebuild the cache with fresh data
     try:
@@ -339,6 +344,15 @@ async def handle_update(message):
         soup = helpers.soup(profile_url)
         print(f"Soup fetched successfully, length: {len(str(soup))}")
         
+        # Call the centralized parsing function directly and show its output
+        print("=== CALLING CENTRALIZED PARSING ===")
+        parsed_data = helpers.parse_character_from_soup(soup)
+        print(f"Raw parsed data from helpers.parse_character_from_soup:")
+        for key, value in parsed_data.items():
+            if key != 'hooks':
+                print(f"  {key}: '{value}'")
+        print("===================================")
+        
         try:
             player = await client.fetch_user(db_character['player'])
             print(f"Player fetched: {player.name} (ID: {player.id})")
@@ -348,17 +362,23 @@ async def handle_update(message):
             data = build_character_data(soup, None, db_character['profile'])
             data['player_name'] = "Unknown Player"
         
-        print(f"Character data built: {data}")
+        print(f"Final character data after build_character_data:")
+        for key, value in data.items():
+            if key != 'hooks':
+                print(f"  {key}: '{value}'")
         
         helpers.write_to_cache(cache_key, data)
         print(f"Data written to cache with key: {cache_key}")
         
-        # Verify cache was written
+        # Verify cache was written and show exact contents
         new_cache_data = helpers.check_cache(cache_key)
         print(f"Cache verification after write: {new_cache_data is not None}")
         if new_cache_data:
             converted_new = helpers.convert_to_strings(new_cache_data)
-            print(f"New cache sample: img_url='{converted_new.get('img_url', 'N/A')}', age='{converted_new.get('age', 'N/A')}', region='{converted_new.get('region', 'N/A')}'")
+            print(f"Final cached data:")
+            for key, value in converted_new.items():
+                if key != 'hooks':
+                    print(f"  {key}: '{value}'")
         
         await message.channel.send(f'Updated: {character}')
         
