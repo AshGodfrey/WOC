@@ -70,6 +70,15 @@ def delete_cache(key: str):
     redis_client.delete(key)
 
 
+def get_character_name(content: str) -> str:
+    """Extract character name from message content."""
+    # Split by space and get the character name (typically after the command)
+    parts = content.split()
+    if len(parts) > 1:
+        return parts[1].lower().strip()
+    return ""
+
+
 def update_character(character: str, player_id: int, profile_html: str) -> str:
     """
     Add new character to Replit DB and prime cache.
