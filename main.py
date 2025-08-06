@@ -118,11 +118,7 @@ async def on_message(message):
     elif content.startswith('!my-activity'):
         await handle_activity(message)
     elif content.startswith('!update'):
-        # parse the character key from the message
-        char = helpers.get_character_name(message.content)
-        # clear the cache so next !character will rebuild it
-        helpers.delete_cache(f'character:{char}')
-        await message.channel.send(f'Cache cleared for {char}')
+        await handle_update(message)
     elif content.startswith('!tag') or message.channel.id == CHANNELS['webhooks']:
         await asyncio.sleep(5)
         await tags.handle_tags(client, CHANNELS['tags'])
@@ -158,7 +154,7 @@ async def handle_accept(message):
     await helpers.send_embed(client, CHANNELS['accepted'], emb)
 
 async def handle_character(message):
-    char = characters.get_character_name(message.content)
+    char = helpers.get_character_name(message.content)
     cache_key = f'character:{char}'
     cached = helpers.check_cache(cache_key)
     if cached:
@@ -236,7 +232,7 @@ async def handle_activity(message):
     await message.channel.send("Report complete! 🚀")
 
 async def handle_update(message):
-    char = characters.get_character_name(message.content)
+    char = helpers.get_character_name(message.content)
     helpers.delete_cache(f'character:{char}')
     await message.channel.send(f'Cache cleared for {char}')
 

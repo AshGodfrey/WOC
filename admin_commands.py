@@ -60,7 +60,7 @@ async def add_character_manually(message):
   )
 
 async def get_raw_character_info(message):
-  character = characters.get_character_name(message.content)
+  character = helpers.get_character_name(message.content)
   await message.channel.send(db[character])
 
 async def change_character_name(message):
@@ -102,12 +102,12 @@ async def delete_character(character, message):
     await message.channel.send(character + ': Not in DB')
 
 async def handle_delete_character(message):
-  character = characters.get_character_name(message.content)
+  character = helpers.get_character_name(message.content)
   await delete_character(character, message)
 
 
 async def handle_check_character(message):
-  character = characters.get_character_name(message.content)
+  character = helpers.get_character_name(message.content)
   character_data = helpers.check_cache('character:' + character)
   #cache hit
   if character_data:
@@ -161,13 +161,13 @@ async def handle_get_color_for_group(message):
 
 
 async def handle_delete_cache(message):
-  character = characters.get_character_name(message.content)
+  character = helpers.get_character_name(message.content)
   helpers.delete_cache('character:' + character)
   await message.channel.send('Removed: ' + character)
 
 
 async def handle_cache(message):
-  character = characters.get_character_name(message.content)
+  character = helpers.get_character_name(message.content)
   soup = helpers.soup(db[character]['profile'])
   #add character to cache
   # Key for the Hashmap
