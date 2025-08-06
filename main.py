@@ -48,31 +48,11 @@ async def handle_character_data(character):
     return None
 
 def build_character_data(soup, author, content_url):
-    def extract_field_by_label(label_text):
-        for field in soup.find_all("field"):
-            label = field.find("label")
-            if label and label.text.strip().lower() == label_text.lower():
-                c = field.find("c")
-                return c.text.strip() if c else ""
-        return ""
-
-    def get_image_url():
-        top = soup.find("top")
-        img = top.find("img") if top else None
-        return img['src'] if img and img.has_attr('src') else ""
-
-    def get_character_class():
-        profile = soup.find("mainprofile")
-        return profile['class'][0] if profile and profile.has_attr('class') else ""
-
+    # Use centralized parsing function
+    parsed_data = helpers.parse_character_from_soup(soup)
+    
     return {
-        'img_url': get_image_url(),
-        'region': extract_field_by_label("Region"),
-        'character_class': get_character_class(),
-        'moniker': extract_field_by_label("Moniker"),
-        'station': extract_field_by_label("Station"),
-        'age': extract_field_by_label("Age"),
-        'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
+        **parsed_data,
         'player_name': author.name if author else "Unknown",
         'player_avatar': str(author.avatar.url) if author and author.avatar else 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png',
         'player_id': author.id if author else 0,

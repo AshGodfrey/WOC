@@ -157,15 +157,12 @@ async def handle_tags(client, channel):
           db_character = db[last_poster]
           soup = helpers.soup(db_character['profile'])
           cache_key = 'character:' + last_poster
-          player = await client.fetch_user(db_character['player']) 
+          player = await client.fetch_user(db_character['player'])
+          
+          # Use centralized parsing function
+          parsed_data = helpers.parse_character_from_soup(soup)
           data = {
-              'img_url': (soup.find("top").find("img"))['src'],
-              'region': (soup.find("pfield", {"id": "region"})).find('c').text,
-              'character_class': soup.find("mainprofile")['class'][0],
-              'moniker': (soup.find("pfield", {"id": "moniker"})).find('c').text,
-              'station': (soup.find("pfield", {"id": "station"})).find('c').text,
-              'age': (soup.find("pfield", {"id": "age"})).find('c').text,
-              'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
+              **parsed_data,
               'player_name': player.name,
               'player_avatar': str(player.avatar.url),
               'player_id': player.id,
@@ -218,20 +215,17 @@ async def handle_tags(client, channel):
       db_character = db[last_poster]
       soup = helpers.soup(db_character['profile'])
       cache_key = 'character:' + last_poster
-      player = await client.fetch_user(db_character['player']) 
+      player = await client.fetch_user(db_character['player'])
+      
+      # Use centralized parsing function
+      parsed_data = helpers.parse_character_from_soup(soup)
       data = {
-            'img_url': (soup.find("top").find("img"))['src'],
-            'region': (soup.find("pfield", {"id": "region"})).find('c').text,
-            'character_class': soup.find("mainprofile")['class'][0],
-            'moniker': (soup.find("pfield", {"id": "moniker"})).find('c').text,
-            'station': (soup.find("pfield", {"id": "station"})).find('c').text,
-            'age': (soup.find("pfield", {"id": "age"})).find('c').text,
-            'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
-            'player_name': player.name,
-            'player_avatar': str(player.avatar.url),
-            'player_id': player.id,
-            'profile_url': db_character['profile'],
-        }
+          **parsed_data,
+          'player_name': player.name,
+          'player_avatar': str(player.avatar.url),
+          'player_id': player.id,
+          'profile_url': db_character['profile'],
+      }
       helpers.write_to_cache(cache_key, data)
       character_data = data
 

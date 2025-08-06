@@ -4,6 +4,7 @@ import requests
 import os
 import redis
 import discord
+import json
 from discord.ext import commands
 intents = discord.Intents.all()
 intents.members = True
@@ -32,6 +33,59 @@ def convert_to_strings(character_data):
 def soup(url):
   response = requests.get(url)
   return BeautifulSoup(response.text, "html.parser")
+
+def parse_character_from_soup(soup_obj):
+  """
+  Centralized function to extract character data from soup object.
+  Based on the HTML structure from the profile page.
+  """
+  data = {}
+  
+  # Extract image URL from top section
+  try:
+    top_section = soup_obj.find("top")
+    if top_section:
+      img = top_section.find("img")
+      data['img_url'] = img['src'] if img and img.has_attr('src') else ""
+    else:
+      data['img_url'] = ""
+  except:
+    data['img_url'] = ""
+  
+  # Extract character class from mainprofile
+  try:
+    profile = soup_obj.find("mainprofile")
+    data['character_class'] = profile['class'][0] if profile and profile.has_attr('class') else ""
+  except:
+    data['character_class'] = ""
+  
+  # Extract profile fields by ID
+  field_mappings = {
+    'region': 'region',
+    'moniker': 'moniker', 
+    'station': 'station',
+    'age': 'age'
+  }
+  
+  for field_id, field_key in field_mappings.items():
+    try:
+      field = soup_obj.find("pfield", {"id": field_id})
+      if field:
+        c_tag = field.find("c")
+        data[field_key] = c_tag.text.strip() if c_tag else ""
+      else:
+        data[field_key] = ""
+    except:
+      data[field_key] = ""
+  
+  # Extract hooks
+  try:
+    hooks = soup_obj.find_all("hook")
+    data['hooks'] = json.dumps([str(hook) for hook in hooks])
+  except:
+    data['hooks'] = json.dumps([])
+  
+  return data
 
 def check_cache(key):
 # Check if the key exists in the cache

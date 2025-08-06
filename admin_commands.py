@@ -177,18 +177,12 @@ async def handle_cache(message):
   avatar_url = playerDiscord.avatar.url  # Get the avatar hash
   player_name = playerDiscord.name  # Get the user ID
 
-  #
-  # Dictionary of key-value pairs to set in the Hashmap
+  # Use centralized parsing function
+  parsed_data = helpers.parse_character_from_soup(soup)
   data = {
-    'img_url': (soup.find("top").find("img"))['src'],
-    'region': (soup.find("pfield", {"id": "region"})).find('c').text,
-    'character_class': soup.find("mainprofile")['class'][0],
-    'moniker': (soup.find("pfield", {"id": "moniker"})).find('c').text,
-    'station': (soup.find("pfield", {"id": "station"})).find('c').text,
-    'age': (soup.find("pfield", {"id": "age"})).find('c').text,
-    'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
+    **parsed_data,
     'player_name': player_name,
-    'player_avatar': avatar_url,
+    'player_avatar': str(avatar_url),
     'player_id': db[character]['player'],
     'profile_url': db[character]['profile']
   }
