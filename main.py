@@ -20,27 +20,26 @@ import players
 import tags
 import admin_commands
 
-# ------------------ Bot Setup ------------------
 intents = discord.Intents.all()
 intents.members = True
 client = commands.Bot(command_prefix='-', intents=intents)
 
-# ------------------ Constants ------------------
 TOKEN = os.environ['token']
 CHANNELS = {
     'webhooks':     1125123474134945792,
     'applications': 1129460613509292162,
     'tags':         1129461412465492099,
     'accepted':     1129460673596887141,
-    'plot_hooks':   1129460842199519314,
+    'plot_hooks':   1129460842199519514,
 }
 AUTHORIZED_USER_IDS = {484491528128167955, 216674599427899393,
                        1071575781458854049, 276839441304125440}
 
-# ------------------ HTML Extraction Helpers ------------------
+
 def extract_gif_url(soup):
     img = soup.find('img', class_='mp-gif')
     return img['src'] if img and img.has_attr('src') else None
+
 
 def extract_infogrid(soup, grid_id):
     node = soup.find('mp-infogrid', {'id': grid_id})
@@ -49,39 +48,48 @@ def extract_infogrid(soup, grid_id):
     child = node.find('scrolltrait') or node.find('c')
     return child.text.strip() if child else None
 
+
 def build_character_data(soup, author, content_url):
-    def extract_field_by_label(label_text):
-        for field in soup.find_all("field"):
-            label = field.find("label")
-            if label and label.text.strip().lower() == label_text.lower():
-                c = field.find("c")
-                return c.text.strip() if c else ""
-        return ""
+    # Core profile fields from infogrid
+    moniker = extract_infogrid(soup, 'moniker') or ''
+    region = extract_infogrid(soup, 'charregion') or ''
+    station = extract_infogrid(soup, 'station') or ''
+    age = extract_infogrid(soup, 'age') or ''
 
-    def get_image_url():
-        top = soup.find("top")
-        img = top.find("img") if top else None
-        return img['src'] if img and img.has_attr('src') else ""
+    # Character name and title tags
+    name_tag = soup.find('charactername')
+    char_name = name_tag.text.strip() if name_tag else ''
 
-    def get_character_class():
-        profile = soup.find("mainprofile")
-        return profile['class'][0] if profile and profile.has_attr('class') else ""
+    title_tag = soup.find('charactertitle')
+    char_title = title_tag.text.strip() if title_tag else ''
+
+    # Avatar: custom vattel-top2 wrapper
+    img_tag = soup.select_one('vattel-top2 img')
+    img_url = img_tag['src'] if img_tag and img_tag.has_attr('src') else ''
+
+    # GIF URL if present
+    gif_url = extract_gif_url(soup) or ''
+
+    # Hooks: collect from <hook> elements
+    hooks = [h.text.strip() for h in soup.find_all('hook') if h.text.strip()]
 
     return {
-        'img_url': get_image_url(),
-        'region': extract_field_by_label("Region"),
-        'character_class': get_character_class(),
-        'moniker': extract_field_by_label("Moniker"),
-        'station': extract_field_by_label("Station"),
-        'age': extract_field_by_label("Age"),
-        'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
-        'player_name': author.name if author else "Unknown",
-        'player_avatar': str(author.avatar.url) if author else "",
+        'img_url': img_url,
+        'gif_url': gif_url,
+        'profile_url': content_url or '',
+        'character_name': char_name,
+        'moniker': moniker,
+        'title': char_title,
+        'region': region,
+        'station': station,
+        'age': age,
+        'character_class': '',  # no <mainprofile> in markup
+        'hooks': json.dumps(hooks),
+        'player_name': author.name if author else 'Unknown',
+        'player_avatar': str(author.avatar.url) if author else '',
         'player_id': author.id if author else 0,
-        'profile_url': content_url or "",
     }
 
-# ------------------ Events ------------------
 @client.event
 async def on_ready():
     print(f'{client.user} connected')
@@ -110,7 +118,11 @@ async def on_message(message):
     elif content.startswith('!my-activity'):
         await handle_activity(message)
     elif content.startswith('!update'):
-        await handle_update(message)
+        # parse the character key from the message
+        char = helpers.get_character_name(message.content)
+        # clear the cache so next !character will rebuild it
+        helpers.delete_cache(f'character:{char}')
+        await message.channel.send(f'Cache cleared for {char}')
     elif content.startswith('!tag') or message.channel.id == CHANNELS['webhooks']:
         await asyncio.sleep(5)
         await tags.handle_tags(client, CHANNELS['tags'])
@@ -123,40 +135,25 @@ async def on_message(message):
     elif message.author.id in AUTHORIZED_USER_IDS:
         await admin_commands.handle_admin_command(message)
 
-# ------------------ Command Handlers ------------------
-async def handle_player(message):
-    parts = message.content.split()
-    if len(parts) < 2:
-        return await message.channel.send("Usage: !player <@user>")
-    player_id = helpers.tag_to_id(parts[1])
-    chars = players.find_characters_by_player(player_id)
-    if not chars:
-        return await message.channel.send('No characters found')
-
-    for char in chars:
-        cache_key = f'character:{char}'
-        cached = helpers.check_cache(cache_key)
-        if cached:
-            emb = characters.character_embed(char, helpers.convert_to_strings(cached))
-            await helpers.send_embed(client, message.channel.id, emb)
-        else:
-            db_char = db[char]
-            soup = helpers.soup(db_char['profile'])
-            data = build_character_data(soup, None, None)
-            helpers.write_to_cache(cache_key, data)
-            emb = characters.character_embed(char, data)
-            await helpers.send_embed(client, CHANNELS['plot_hooks'], emb)
-
 async def handle_accept(message):
     channel = client.get_channel(CHANNELS['applications'])
     msgs = [m async for m in channel.history(limit=2)]
     soup = helpers.soup(msgs[1].content.strip())
     character = soup.find('charactername').text.strip().lower()
+
+    db[character] = {
+        "profile": msgs[1].content.strip(),
+        "player": msgs[1].author.id,
+        "last_post_date": "",
+    }
+
     data = build_character_data(soup, msgs[1].author, msgs[1].content.strip())
     cache_key = f'character:{character}'
     helpers.write_to_cache(cache_key, data)
+
     for m in msgs:
         await m.delete()
+
     emb = characters.character_embed(character, data)
     await helpers.send_embed(client, CHANNELS['accepted'], emb)
 
@@ -276,18 +273,38 @@ async def handle_roll_region(message):
 scheduler = AsyncIOScheduler()
 scheduler.add_job(lambda: players.cache_characters_by_player(), 'cron', hour=0, minute=0)
 
+
 async def check_timers():
+    """
+    Periodically checks Redis for timer keys in the format "<userId>-<timestamp>" and sends notifications.
+    Safely skips any keys that don't match the expected pattern.
+    """
     while True:
         now = int(time.time())
         for key in helpers.redis_client.keys('*'):
-            user, ts = key.decode().split('-')
-            if now >= int(ts):
-                channel_id = int(helpers.redis_client.get(key).decode())
-                ch = client.get_channel(channel_id)
+            try:
+                decoded = key.decode()
+                # Ensure the key contains exactly one dash separating user and timestamp
+                user_str, ts_str = decoded.split('-', 1)
+                ts = int(ts_str)
+            except (ValueError, AttributeError):
+                # Skip keys that don't match the expected "user-timestamp" format
+                continue
+
+            if now >= ts:
+                channel_id = helpers.redis_client.get(key)
+                try:
+                    channel_id = int(channel_id.decode())
+                except Exception:
+                    continue
+
+                ch = helpers.client.get_channel(channel_id)
                 if ch:
-                    await ch.send(f'<@{user}> your timer is up!')
+                    await ch.send(f'<@{user_str}> your timer is up!')
                 helpers.redis_client.delete(key)
+
         await asyncio.sleep(10)
+
 
 @client.event
 async def setup_hook():
