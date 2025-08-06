@@ -199,7 +199,8 @@ async def handle_character(message):
     
     if character_data:
         converted_data = helpers.convert_to_strings(character_data)
-        print(f"Using cached data: {converted_data}")
+        print(f"CHARACTER COMMAND - Using cached data for age: '{converted_data.get('age', 'N/A')}'")
+        print(f"CHARACTER COMMAND - Full cached data: {converted_data}")
         embed = characters.character_embed(character, converted_data)
         await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
     else:
@@ -321,12 +322,21 @@ async def handle_update(message):
         print(f"Old cache sample: img_url='{converted_old.get('img_url', 'N/A')}', age='{converted_old.get('age', 'N/A')}', region='{converted_old.get('region', 'N/A')}'")
     
     # Force delete cache and verify it's gone
+    print(f"About to delete cache with key: '{cache_key}'")
     helpers.delete_cache(cache_key)
-    print(f"Cache deleted for: {cache_key}")
+    print(f"Cache delete operation completed for: {cache_key}")
+    
+    # Wait a moment to ensure Redis operation completes
+    import asyncio
+    await asyncio.sleep(0.1)
     
     # Double-check cache is actually empty
     verify_empty = helpers.check_cache(cache_key)
     print(f"Cache verification after delete (should be False): {verify_empty}")
+    if verify_empty:
+        print("WARNING: Cache was not properly deleted!")
+        converted_still_there = helpers.convert_to_strings(verify_empty)
+        print(f"Still cached: age='{converted_still_there.get('age', 'N/A')}'")
     
     # Rebuild the cache with fresh data
     try:
@@ -381,6 +391,12 @@ async def handle_update(message):
                     print(f"  {key}: '{value}'")
         
         await message.channel.send(f'Updated: {character}')
+        
+        # Immediate verification: check what's actually cached right now
+        immediate_check = helpers.check_cache(cache_key)
+        if immediate_check:
+            immediate_converted = helpers.convert_to_strings(immediate_check)
+            print(f"IMMEDIATE VERIFICATION - Cached age right after update: '{immediate_converted.get('age', 'N/A')}'")
         
         # Send the updated embed to verify it worked
         embed = characters.character_embed(character, data)
