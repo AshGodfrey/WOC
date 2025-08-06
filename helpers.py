@@ -45,21 +45,50 @@ def parse_character_from_soup(soup_obj):
   for tag in soup_obj(['style', 'script']):
     tag.decompose()
   
-  # Extract image URL - look for avatar/profile images specifically
+  # Extract image URL - look for character images specifically
   try:
-    # Look for profile/avatar images first
-    avatar_img = soup_obj.find("img", {"class": lambda x: x and ("avatar" in str(x).lower() or "profile" in str(x).lower())})
-    if not avatar_img:
-      # Fallback to any img tag
-      avatar_img = soup_obj.find("img")
+    data['img_url'] = ""
     
-    data['img_url'] = avatar_img['src'] if avatar_img and avatar_img.has_attr('src') else ""
+    # Method 1: Look for images with character-related classes or ids
+    character_img = soup_obj.find("img", {"class": lambda x: x and any(term in str(x).lower() for term in ["character", "avatar", "profile", "portrait"])})
+    if character_img and character_img.has_attr('src'):
+      data['img_url'] = character_img['src']
+    
+    # Method 2: Look for images in divs with character-related classes
+    if not data['img_url']:
+      char_divs = soup_obj.find_all("div", {"class": lambda x: x and any(term in str(x).lower() for term in ["character", "avatar", "profile", "portrait"])})
+      for div in char_divs:
+        img = div.find("img")
+        if img and img.has_attr('src'):
+          data['img_url'] = img['src']
+          break
+    
+    # Method 3: Look for larger images (profile images are usually bigger)
+    if not data['img_url']:
+      all_imgs = soup_obj.find_all("img")
+      for img in all_imgs:
+        if img.has_attr('src'):
+          src = img['src']
+          # Skip small icons/decorative images
+          if any(skip_term in src.lower() for skip_term in ['icon', 'bullet', 'arrow', 'star', 'dot', 'line']):
+            continue
+          # Look for reasonable image file extensions
+          if any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+            data['img_url'] = src
+            break
+    
+    # Method 4: Fallback to first img tag if nothing else found
+    if not data['img_url']:
+      first_img = soup_obj.find("img")
+      data['img_url'] = first_img['src'] if first_img and first_img.has_attr('src') else ""
     
     # Clean up URL if it's relative
     if data['img_url'] and data['img_url'].startswith('//'):
       data['img_url'] = 'https:' + data['img_url']
     elif data['img_url'] and data['img_url'].startswith('/'):
       data['img_url'] = 'https://windsofchangerp.jcink.net' + data['img_url']
+      
+    print(f"Found image URL: {data['img_url']}")
       
   except Exception as e:
     print(f"Error extracting image URL: {e}")
@@ -101,11 +130,21 @@ def parse_character_from_soup(soup_obj):
       field_by_id = soup_obj.find(id=field_id)
       if field_by_id:
         field_text = field_by_id.get_text(strip=True)
-        # Remove the field label from the text
-        clean_text = field_text.replace(field_id, '').strip()
-        # Limit field text length to avoid CSS pollution
-        if len(clean_text) < 100 and clean_text:
-          data[field_key] = clean_text
+        # Special handling for age field - extract ONLY the number
+        if field_id == 'age':
+          import re
+          numbers = re.findall(r'\b(\d+)\b', field_text)
+          for num in numbers:
+            if num.isdigit() and 10 <= int(num) <= 150:  # reasonable age range
+              data[field_key] = num
+              break
+        else:
+          # Remove the field label from the text
+          clean_text = field_text.replace(field_id, '').strip()
+          # Limit field text length to avoid CSS pollution
+          if len(clean_text) < 100 and clean_text:
+            data[field_key] = clean_text
+        if data[field_key]:
           continue
       
       # Method 2: Look for field labels and extract following content
