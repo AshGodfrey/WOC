@@ -138,14 +138,15 @@ def parse_character_from_soup(soup_obj):
             if num.isdigit() and 10 <= int(num) <= 150:  # reasonable age range
               data[field_key] = num
               break
+          if data.get(field_key):  # Only continue if we found a valid age
+            continue
         else:
           # Remove the field label from the text
           clean_text = field_text.replace(field_id, '').strip()
           # Limit field text length to avoid CSS pollution
           if len(clean_text) < 100 and clean_text:
             data[field_key] = clean_text
-        if data[field_key]:
-          continue
+            continue
       
       # Method 2: Look for field labels and extract following content
       import re
