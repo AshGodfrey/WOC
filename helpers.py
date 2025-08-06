@@ -41,30 +41,51 @@ def parse_character_from_soup(soup_obj):
   """
   data = {}
   
-  # Extract image URL - look for any img tag in the document
+  # Remove style and script tags to avoid CSS pollution
+  for tag in soup_obj(['style', 'script']):
+    tag.decompose()
+  
+  # Extract image URL - look for avatar/profile images specifically
   try:
-    img = soup_obj.find("img")
-    data['img_url'] = img['src'] if img and img.has_attr('src') else ""
+    # Look for profile/avatar images first
+    avatar_img = soup_obj.find("img", {"class": lambda x: x and ("avatar" in str(x).lower() or "profile" in str(x).lower())})
+    if not avatar_img:
+      # Fallback to any img tag
+      avatar_img = soup_obj.find("img")
+    
+    data['img_url'] = avatar_img['src'] if avatar_img and avatar_img.has_attr('src') else ""
+    
+    # Clean up URL if it's relative
+    if data['img_url'] and data['img_url'].startswith('//'):
+      data['img_url'] = 'https:' + data['img_url']
+    elif data['img_url'] and data['img_url'].startswith('/'):
+      data['img_url'] = 'https://windsofchangerp.jcink.net' + data['img_url']
+      
   except Exception as e:
     print(f"Error extracting image URL: {e}")
     data['img_url'] = ""
   
-  # Extract character class from any element with class attribute
+  # Extract character class - look for meaningful class names, avoid CSS classes
   try:
-    # Look for elements that might have character class info
-    profile_elements = soup_obj.find_all(class_=True)
     data['character_class'] = ""
+    # Look for elements with meaningful class names (not CSS-related)
+    profile_elements = soup_obj.find_all(class_=True)
     for elem in profile_elements:
       classes = elem.get('class', [])
-      if isinstance(classes, list) and classes:
-        # Take the first meaningful class
-        data['character_class'] = classes[0]
-        break
+      if isinstance(classes, list):
+        for cls in classes:
+          # Skip CSS-related classes
+          if not any(css_term in cls.lower() for css_term in ['color', 'background', 'font', 'margin', 'padding', 'border', 'width', 'height']):
+            if len(cls) > 2 and len(cls) < 30:  # Reasonable length for a class name
+              data['character_class'] = cls
+              break
+        if data['character_class']:
+          break
   except Exception as e:
     print(f"Error extracting character class: {e}")
     data['character_class'] = ""
   
-  # Try to extract profile fields - be more flexible with the structure
+  # Try to extract profile fields more precisely
   field_mappings = {
     'region': 'region',
     'moniker': 'moniker', 
@@ -76,76 +97,64 @@ def parse_character_from_soup(soup_obj):
     try:
       data[field_key] = ""
       
-      # Method 1: Look for any element with matching id
+      # Method 1: Look for elements with matching id
       field_by_id = soup_obj.find(id=field_id)
       if field_by_id:
-        data[field_key] = field_by_id.get_text(strip=True)
-        continue
+        field_text = field_by_id.get_text(strip=True)
+        # Limit field text length to avoid CSS pollution
+        if len(field_text) < 100:
+          data[field_key] = field_text
+          continue
       
-      # Method 2: Look for text that contains the field name (case insensitive)
-      all_text_elements = soup_obj.find_all(text=True)
-      for text in all_text_elements:
-        text_str = str(text).strip().lower()
-        if field_id.lower() in text_str:
-          # Try to find the parent element and get following text
-          parent = text.parent
-          if parent:
-            next_text = parent.get_text(strip=True)
-            # Extract text after the field name
-            if ':' in next_text:
-              parts = next_text.split(':', 1)
-              if len(parts) > 1:
-                data[field_key] = parts[1].strip()
-                break
-      
-      # Method 3: Look for common field patterns in the HTML
-      if not data[field_key]:
-        # Search for field patterns like "Age: 25" in the text
-        page_text = soup_obj.get_text()
-        import re
-        pattern = rf'{field_id}\s*:?\s*([^\n\r]+)'
-        match = re.search(pattern, page_text, re.IGNORECASE)
-        if match:
-          data[field_key] = match.group(1).strip()
+      # Method 2: Look for field labels and extract following content
+      import re
+      # Search for field patterns in a more controlled way
+      text_content = soup_obj.get_text(separator='\n')
+      # Limit text content to avoid processing CSS
+      if len(text_content) > 5000:
+        # Only look in the first part of the content to avoid CSS
+        text_content = text_content[:5000]
+        
+      pattern = rf'{field_id}\s*:?\s*([^\n]+)'
+      match = re.search(pattern, text_content, re.IGNORECASE)
+      if match:
+        field_value = match.group(1).strip()
+        # Only use if it's reasonable length and doesn't look like CSS
+        if len(field_value) < 100 and not any(css_term in field_value.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:', '{', '}', 'px', 'em', 'rem']):
+          data[field_key] = field_value
           
     except Exception as e:
       print(f"Error extracting {field_key}: {e}")
       data[field_key] = ""
   
-  # Extract hooks - look for any elements that might contain hook information
+  # Extract hooks - be more careful to avoid CSS content
   try:
     hooks = []
     
-    # Method 1: Look for actual <hook> tags
+    # Look for actual <hook> tags first
     hook_tags = soup_obj.find_all("hook")
     if hook_tags:
-      hooks = [str(hook) for hook in hook_tags]
-    else:
-      # Method 2: Look for any elements that might be hooks based on content patterns
-      # This is a fallback for when the structure is different
-      all_elements = soup_obj.find_all()
-      for elem in all_elements:
-        elem_text = elem.get_text(strip=True).lower()
-        # Look for hook-like patterns
-        if any(word in elem_text for word in ['hook', 'child', 'defender', 'free', 'handmaid', 'missing', 'oblivious']):
-          # Create a mock hook structure
-          subtitle = elem.get_text(strip=True)
-          if subtitle and len(subtitle) < 100:  # Reasonable length for a subtitle
-            mock_hook = f'<hook><subtitle>{subtitle}</subtitle></hook>'
-            hooks.append(mock_hook)
+      for hook in hook_tags:
+        hook_str = str(hook)
+        # Only include if it's reasonable size and doesn't contain CSS
+        if len(hook_str) < 500 and not any(css_term in hook_str.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:']):
+          hooks.append(hook_str)
     
+    # Limit total hooks to avoid huge embeds
+    hooks = hooks[:6]  # Max 6 hooks
     data['hooks'] = json.dumps(hooks)
+    
   except Exception as e:
     print(f"Error extracting hooks: {e}")
     data['hooks'] = json.dumps([])
   
-  # Debug output to help troubleshoot
+  # Debug output with size limits
   print(f"=== CHARACTER PARSING DEBUG ===")
   print(f"Found {len(soup_obj.find_all())} total elements")
-  print(f"Found {len(soup_obj.find_all('img'))} img elements")
-  print(f"All element tags found: {set(tag.name for tag in soup_obj.find_all() if tag.name)}")
-  print(f"Sample of page text: {soup_obj.get_text()[:200]}...")
-  print(f"Parsed data: {data}")
+  print(f"Parsed data sizes: img_url={len(data.get('img_url', ''))}, hooks={len(data.get('hooks', ''))}")
+  for key, value in data.items():
+    if key != 'hooks':
+      print(f"{key}: '{value[:50]}{'...' if len(str(value)) > 50 else ''}'")
   print("==============================")
   
   return data
