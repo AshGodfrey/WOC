@@ -119,19 +119,19 @@ def parse_character_from_soup(soup_obj):
         
       # Special handling for age field to extract just the number
       if field_id == 'age':
-        # Look for age patterns like "years of age26" or "age26" and extract just the number
+        # Look for age patterns and extract just the number
         age_patterns = [
-          r'years\s+of\s+age\s*(\d+)',  # "years of age 26"
-          r'age\s*(\d+)',               # "age 26"
-          r'(\d+)\s+years',             # "26 years"
-          r'\b(\d+)\b'                  # any standalone number
+          r'years\s+of\s+age\s*(\d+)',   # "years of age 26"
+          r'(?:age|years)\D*(\d+)',      # "age26", "years26", etc - any non-digit chars between
+          r'(\d+)\s+years?\s+of\s+age',  # "26 years of age"
+          r'(\d+)\s+years?',             # "26 years"
         ]
         
         for age_pattern in age_patterns:
           age_match = re.search(age_pattern, text_content, re.IGNORECASE)
           if age_match:
             age_value = age_match.group(1).strip()
-            if age_value and age_value.isdigit():
+            if age_value and age_value.isdigit() and 10 <= int(age_value) <= 150:  # reasonable age range
               data[field_key] = age_value
               break
       else:
