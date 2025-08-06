@@ -1,3 +1,4 @@
+
 from keep_alive import keep_alive
 keep_alive()
 
@@ -33,21 +34,18 @@ CHANNELS = {
     'tags':         1129461412465492099,
     'accepted':     1129460673596887141,
     'plot_hooks':   1129460842199519314,
+    'test':         1125111458020196443,
 }
 AUTHORIZED_USER_IDS = {484491528128167955, 216674599427899393,
                        1071575781458854049, 276839441304125440}
 
-# ------------------ HTML Extraction Helpers ------------------
-def extract_gif_url(soup):
-    img = soup.find('img', class_='mp-gif')
-    return img['src'] if img and img.has_attr('src') else None
-
-def extract_infogrid(soup, grid_id):
-    node = soup.find('mp-infogrid', {'id': grid_id})
-    if not node:
-        return None
-    child = node.find('scrolltrait') or node.find('c')
-    return child.text.strip() if child else None
+# ------------------ Helper Functions ------------------
+async def handle_character_data(character):
+    character_data = helpers.check_cache('character:' + character)
+    if character_data:
+        converted_data = helpers.convert_to_strings(character_data)
+        return converted_data
+    return None
 
 def build_character_data(soup, author, content_url):
     def extract_field_by_label(label_text):
@@ -76,7 +74,7 @@ def build_character_data(soup, author, content_url):
         'age': extract_field_by_label("Age"),
         'hooks': json.dumps([str(hook) for hook in soup.find_all("hook")]),
         'player_name': author.name if author else "Unknown",
-        'player_avatar': str(author.avatar.url) if author else "",
+        'player_avatar': str(author.avatar.url) if author and author.avatar else 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png',
         'player_id': author.id if author else 0,
         'profile_url': content_url or "",
     }
@@ -84,7 +82,7 @@ def build_character_data(soup, author, content_url):
 # ------------------ Events ------------------
 @client.event
 async def on_ready():
-    print(f'{client.user} connected')
+    print(f'{client.user} has connected to Discord!')
 
 @client.event
 async def on_message(message):
@@ -93,20 +91,14 @@ async def on_message(message):
 
     content = message.content.strip()
 
-    if content == '!dump-html':
-        db_char = db.get('some_character_key')
-        soup = helpers.soup(db_char['profile'])
-        await message.channel.send('HTML dumped to console.')
-        return
-
-    if content.startswith('!player'):
+    if content.startswith('!notify'):
+        await handle_notify(message)
+    elif content.startswith('!player'):
         await handle_player(message)
     elif message.channel.id == CHANNELS['applications'] and content.startswith('!accept'):
         await handle_accept(message)
     elif content.startswith('!character'):
         await handle_character(message)
-    elif content.startswith('!notify'):
-        await handle_notify(message)
     elif content.startswith('!my-activity'):
         await handle_activity(message)
     elif content.startswith('!update'):
@@ -114,75 +106,132 @@ async def on_message(message):
     elif content.startswith('!tag') or message.channel.id == CHANNELS['webhooks']:
         await asyncio.sleep(5)
         await tags.handle_tags(client, CHANNELS['tags'])
+    elif content.startswith('!choose-'):
+        await handle_choose_key(message)
     elif content.startswith('!choose '):
         await handle_choose(message)
-    elif content.startswith('!roll '):
-        await handle_roll(message)
     elif content.startswith('!roll-region'):
         await handle_roll_region(message)
+    elif content.startswith('!roll-characters'):
+        await handle_roll_characters(message)
+    elif content.startswith('!roll '):
+        await handle_roll(message)
     elif message.author.id in AUTHORIZED_USER_IDS:
         await admin_commands.handle_admin_command(message)
 
 # ------------------ Command Handlers ------------------
+async def handle_notify(message):
+    details = message.content.split(' ')
+    if len(details) != 2 or not details[1].isdigit():
+        await message.channel.send("Please specify the timer duration in minutes using `!notify <minutes>`.")
+        return
+
+    minutes = int(details[1])
+    end_time = int(time.time()) + (minutes * 60)
+    timer_id = f"{message.author.id}-{end_time}"
+
+    helpers.redis_client.set(timer_id, message.channel.id)
+    await message.channel.send(f"Timer set for {minutes} minute(s).")
+
 async def handle_player(message):
-    parts = message.content.split()
+    parts = message.content.split(' ')
     if len(parts) < 2:
         return await message.channel.send("Usage: !player <@user>")
-    player_id = helpers.tag_to_id(parts[1])
-    chars = players.find_characters_by_player(player_id)
-    if not chars:
-        return await message.channel.send('No characters found')
+    
+    player_id = helpers.tag_to_id(parts[1].strip())
+    player_characters = players.find_characters_by_player(player_id)
+    
+    if not player_characters:
+        await message.channel.send("No characters found")
+        return
 
-    for char in chars:
-        cache_key = f'character:{char}'
-        cached = helpers.check_cache(cache_key)
-        if cached:
-            emb = characters.character_embed(char, helpers.convert_to_strings(cached))
-            await helpers.send_embed(client, message.channel.id, emb)
+    for character in player_characters:
+        character_data = helpers.check_cache('character:' + character)
+        if character_data:
+            converted_data = helpers.convert_to_strings(character_data)
+            embed = characters.character_embed(character, converted_data)
+            await helpers.send_embed(client, message.channel.id, embed)
         else:
-            db_char = db[char]
-            soup = helpers.soup(db_char['profile'])
-            data = build_character_data(soup, None, None)
+            # Cache miss - build data and cache it
+            db_character = db[character]
+            soup = helpers.soup(db_character['profile'])
+            cache_key = 'character:' + character
+            
+            try:
+                player = await client.fetch_user(db_character['player'])
+                data = build_character_data(soup, player, db_character['profile'])
+            except:
+                data = build_character_data(soup, None, db_character['profile'])
+                data['player_name'] = "Unknown Player"
+                data['player_id'] = player_id
+            
             helpers.write_to_cache(cache_key, data)
-            emb = characters.character_embed(char, data)
-            await helpers.send_embed(client, CHANNELS['plot_hooks'], emb)
+            embed = characters.character_embed(character, data)
+            await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
 
 async def handle_accept(message):
     channel = client.get_channel(CHANNELS['applications'])
-    msgs = [m async for m in channel.history(limit=2)]
-    soup = helpers.soup(msgs[1].content.strip())
-    character = soup.find('charactername').text.strip().lower()
-    data = build_character_data(soup, msgs[1].author, msgs[1].content.strip())
-    cache_key = f'character:{character}'
+    messages = [message async for message in channel.history(limit=2)]
+    soup = helpers.soup(messages[1].content.strip())
+    
+    # Try different possible tag names for character name
+    character_name = None
+    for tag in ['name', 'charactername']:
+        name_tag = soup.find(tag)
+        if name_tag:
+            character_name = name_tag.text.strip().lower()
+            break
+    
+    if not character_name:
+        await message.channel.send("Could not find character name in application")
+        return
+    
+    # Save character to database
+    characters.update_character(character_name, str(messages[1].author.id), messages[1].content.strip())
+    
+    # Build and cache character data
+    data = build_character_data(soup, messages[1].author, messages[1].content.strip())
+    cache_key = 'character:' + character_name
     helpers.write_to_cache(cache_key, data)
-    for m in msgs:
-        await m.delete()
-    emb = characters.character_embed(character, data)
-    await helpers.send_embed(client, CHANNELS['accepted'], emb)
+    
+    # Delete application messages
+    for msg in messages:
+        await msg.delete()
+    
+    # Send acceptance embed
+    embed = characters.character_embed(character_name, data)
+    await helpers.send_embed(client, CHANNELS['accepted'], embed)
 
 async def handle_character(message):
-    char = characters.get_character_name(message.content)
-    cache_key = f'character:{char}'
-    cached = helpers.check_cache(cache_key)
-    if cached:
-        emb = characters.character_embed(char, helpers.convert_to_strings(cached))
-        return await helpers.send_embed(client, CHANNELS['plot_hooks'], emb)
-    db_char = db[char]
-    soup = helpers.soup(db_char['profile'])
-    player_obj = await client.fetch_user(db_char['player'])
-    data = build_character_data(soup, player_obj, db_char['profile'])
-    helpers.write_to_cache(cache_key, data)
-    emb = characters.character_embed(char, data)
-    await helpers.send_embed(client, CHANNELS['plot_hooks'], emb)
-
-async def handle_notify(message):
-    parts = message.content.split()
-    if len(parts) != 2 or not parts[1].isdigit():
-        return await message.channel.send("Usage: !notify <minutes>")
-    minutes = int(parts[1])
-    key = f"{message.author.id}-{int(time.time()) + minutes * 60}"
-    helpers.redis_client.set(key, message.channel.id)
-    await message.channel.send(f"Timer set for {minutes} minute(s).")
+    character = characters.get_character_name(message.content)
+    cache_key = f'character:{character}'
+    character_data = helpers.check_cache(cache_key)
+    
+    if character_data:
+        converted_data = helpers.convert_to_strings(character_data)
+        embed = characters.character_embed(character, converted_data)
+        await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
+    else:
+        # Cache miss
+        db_character = db[character]
+        soup = helpers.soup(db_character['profile'])
+        
+        if character == "the many-faced god":
+            data = build_character_data(soup, None, db_character['profile'])
+            data['player_name'] = "The Many-Faced God"
+            data['player_avatar'] = "https://i.ytimg.com/vi/JkdMGgh87nw/hqdefault.jpg"
+            data['player_id'] = ""
+        else:
+            try:
+                player = await client.fetch_user(db_character['player'])
+                data = build_character_data(soup, player, db_character['profile'])
+            except:
+                data = build_character_data(soup, None, db_character['profile'])
+                data['player_name'] = "Unknown Player"
+        
+        helpers.write_to_cache(cache_key, data)
+        embed = characters.character_embed(character, data)
+        await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
 
 async def handle_activity(message):
     await message.channel.send("Building your activity report… one moment.")
@@ -190,16 +239,21 @@ async def handle_activity(message):
     cutoff = now - datetime.timedelta(days=14)
     me = str(message.author.id)
 
-    raw_chars = players.find_characters_by_player(me)
-    my_chars = list(raw_chars)
+    try:
+        raw_chars = players.find_characters_by_player(me)
+        my_chars = list(raw_chars)
+    except:
+        return await message.channel.send("You have no characters in the database.")
+    
     if not my_chars:
         return await message.channel.send("You have no characters in the database.")
 
     active, inactive = [], []
     for char in my_chars:
         entry = db.get(char)
-        if not hasattr(entry, 'get'):
+        if not entry or not hasattr(entry, 'get'):
             continue
+        
         raw_date = entry.get('last_post_date')
         dt = None
         if raw_date:
@@ -215,6 +269,7 @@ async def handle_activity(message):
                     dt = datetime.datetime.fromisoformat(s)
                 except:
                     dt = None
+        
         title = char.title()
         if dt and dt >= cutoff:
             active.append((title, dt.strftime("%Y-%m-%d")))
@@ -226,6 +281,7 @@ async def handle_activity(message):
     embed = discord.Embed(color=color)
     display = f"{message.author.display_name} ({message.author.name}#{message.author.discriminator})"
     embed.set_author(name=display, icon_url=message.author.display_avatar.url)
+    
     if active:
         embed.add_field(name="🟢 Active Characters",
                         value="\n".join(f"• **{n}** — {d}" for n, d in active),
@@ -235,59 +291,115 @@ async def handle_activity(message):
         embed.add_field(name="⚪️ Inactive Characters",
                         value=val if len(val) <= 1024 else "Too many to display.",
                         inline=False)
+    
     await message.channel.send(embed=embed)
     await message.channel.send("Report complete! 🚀")
 
 async def handle_update(message):
-    char = characters.get_character_name(message.content)
-    helpers.delete_cache(f'character:{char}')
-    await message.channel.send(f'Cache cleared for {char}')
+    character = characters.get_character_name(message.content)
+    helpers.delete_cache('character:' + character)
+    await message.channel.send('Updated: ' + character)
+
+async def handle_choose_key(message):
+    key = message.content.split('!choose-')[1].strip()
+    try:
+        values = db[key]
+        rolled_value = random.choice(values)
+        await message.channel.send(f"{rolled_value}")
+    except KeyError:
+        await message.channel.send(f"Key '{key}' not found in database")
 
 async def handle_choose(message):
-    opts = [opt.strip() for opt in message.content[len('!choose '):].split(',')]
-    choice = random.choice(opts)
-    await message.channel.send(choice)
+    content = message.content[len('!choose '):]  
+    items = [item.strip() for item in content.split(',')]
+    chosen_item = random.choice(items)
+    await message.channel.send(chosen_item)
 
 async def handle_roll(message):
-    match = re.match(r'^!roll (\d+)d(\d+)((?:[-+*]\d+)*)', message.content)
+    match = re.search(r'^!roll (\d+)d(\d+)((?:[-+*]\d+)*)', message.content)
     if not match:
-        return await message.channel.send("Use XdY[+|-|*]Z")
-    num, sides, mods = match.groups()
-    num, sides = int(num), int(sides)
-    if num < 1 or sides < 1:
-        return await message.channel.send("Dice and sides must be ≥1")
-    rolls = [random.randint(1, sides) for _ in range(num)]
-    total = sum(rolls)
-    for m in re.findall(r'[-+*]\d+', mods):
-        op, val = m[0], int(m[1:])
-        if op == '+':
-            total += val
-        elif op == '-':
-            total -= val
-        elif op == '*':
-            total *= val
-    await message.channel.send(f"🎲 Rolls: {', '.join(map(str, rolls))} {mods}\nTotal: {total}")
+        await message.channel.send("Please use the format XdY[+|-|*]Z, where X is the number of dice, Y is the number of sides, and Z is an optional modifier.")
+        return
+
+    num_dice, sides, modifiers = match.groups()
+    num_dice, sides = map(int, [num_dice, sides])
+
+    if num_dice < 1 or sides < 1:
+        await message.channel.send("Both the number of dice and the number of sides must be at least 1.")
+        return
+
+    # Roll the dice
+    results = [random.randint(1, sides) for _ in range(num_dice)]
+    total = sum(results)
+
+    # Calculate the total with all modifiers applied
+    modifiers_list = re.findall(r'[-+*]\d+', modifiers)
+    modified_total = total
+
+    for modifier in modifiers_list:
+        operator = modifier[0]
+        mod_value = int(modifier[1:])
+        if operator == '+':
+            modified_total += mod_value
+        elif operator == '-':
+            modified_total -= mod_value
+        elif operator == '*':
+            modified_total *= mod_value
+
+    results_str = ", ".join(map(str, results))
+    await message.channel.send(f"🎲 Rolls: {results_str} {modifiers}\nTotal: {modified_total}")
 
 async def handle_roll_region(message):
-    region = random.choice(db['region'])
-    await message.channel.send(region)
+    try:
+        regions = db["region"]
+        chosen_region = random.choice(regions)
+        await message.channel.send(chosen_region)
+    except KeyError:
+        await message.channel.send("No regions found in database")
+
+async def handle_roll_characters(message):
+    player_id = str(message.author.id)
+    try:
+        player_characters = db[player_id]
+        chosen_item = random.choice(player_characters)
+        
+        data = await handle_character_data(chosen_item)
+        if data:
+            embed = characters.mini_embed(chosen_item, data)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send(chosen_item)
+    except Exception as e:
+        await message.channel.send(f"An error occurred getting character card, notify Ashe: {str(e)}")
 
 # ------------------ Scheduler & Timers ------------------
 scheduler = AsyncIOScheduler()
-scheduler.add_job(lambda: players.cache_characters_by_player(), 'cron', hour=0, minute=0)
+
+async def scheduled_job():
+    await players.cache_characters_by_player()
+
+scheduler.add_job(scheduled_job, 'cron', hour='0', minute='0')
 
 async def check_timers():
     while True:
-        now = int(time.time())
-        for key in helpers.redis_client.keys('*'):
-            user, ts = key.decode().split('-')
-            if now >= int(ts):
-                channel_id = int(helpers.redis_client.get(key).decode())
-                ch = client.get_channel(channel_id)
-                if ch:
-                    await ch.send(f'<@{user}> your timer is up!')
-                helpers.redis_client.delete(key)
-        await asyncio.sleep(10)
+        try:
+            current_time = int(time.time())
+            for key in helpers.redis_client.keys("*"):
+                key_parts = key.decode().split('-')
+                if len(key_parts) == 2 and key_parts[1].isdigit():
+                    end_time = int(key_parts[1])
+                    if end_time <= current_time:
+                        channel_id = int(helpers.redis_client.get(key).decode())
+                        author_id = key_parts[0]
+                        channel = client.get_channel(channel_id)
+                        if channel:
+                            await channel.send(f'<@{author_id}> your timer is up!')
+                        else:
+                            print(f"Invalid channel ID: {channel_id}")
+                        helpers.redis_client.delete(key)
+            await asyncio.sleep(10)
+        except Exception as e:
+            print(f"An error occurred in check_timers: {e}")
 
 @client.event
 async def setup_hook():
