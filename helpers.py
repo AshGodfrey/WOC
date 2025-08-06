@@ -41,12 +41,16 @@ def parse_character_from_soup(soup_obj):
   """
   data = {}
   
-  # Extract image URL from top section
+  # Extract image URL - try multiple approaches
   try:
+    # First try to find img in top section
     top_section = soup_obj.find("top")
     if top_section:
       img = top_section.find("img")
-      data['img_url'] = img['src'] if img and img.has_attr('src') else ""
+      if img and img.has_attr('src'):
+        data['img_url'] = img['src']
+      else:
+        data['img_url'] = ""
     else:
       # Fallback: try to find any img tag in the document
       img = soup_obj.find("img")
@@ -59,14 +63,15 @@ def parse_character_from_soup(soup_obj):
   try:
     profile = soup_obj.find("mainprofile")
     if profile and profile.has_attr('class'):
-      data['character_class'] = profile['class'][0] if isinstance(profile['class'], list) else profile['class']
+      class_val = profile['class']
+      data['character_class'] = class_val[0] if isinstance(class_val, list) else str(class_val)
     else:
       data['character_class'] = ""
   except Exception as e:
     print(f"Error extracting character class: {e}")
     data['character_class'] = ""
   
-  # Extract profile fields by ID
+  # Extract profile fields by ID with better error handling
   field_mappings = {
     'region': 'region',
     'moniker': 'moniker', 
@@ -76,30 +81,46 @@ def parse_character_from_soup(soup_obj):
   
   for field_id, field_key in field_mappings.items():
     try:
+      # Look for pfield with specific id
       field = soup_obj.find("pfield", {"id": field_id})
       if field:
+        # Try to find c tag first
         c_tag = field.find("c")
-        if c_tag:
-          data[field_key] = c_tag.text.strip()
+        if c_tag and c_tag.get_text(strip=True):
+          data[field_key] = c_tag.get_text(strip=True)
         else:
-          # Fallback: get direct text content
-          data[field_key] = field.get_text(strip=True)
+          # Fallback to direct text content of pfield
+          text = field.get_text(strip=True)
+          data[field_key] = text if text else ""
       else:
-        data[field_key] = ""
+        # Alternative: look for any element with id matching field_id
+        alt_field = soup_obj.find(id=field_id)
+        if alt_field:
+          data[field_key] = alt_field.get_text(strip=True)
+        else:
+          data[field_key] = ""
     except Exception as e:
-      print(f"Error extracting {field_key}: {e}")
+      print(f"Error extracting {field_key} (id: {field_id}): {e}")
       data[field_key] = ""
   
   # Extract hooks
   try:
     hooks = soup_obj.find_all("hook")
-    data['hooks'] = json.dumps([str(hook) for hook in hooks])
+    if hooks:
+      data['hooks'] = json.dumps([str(hook) for hook in hooks])
+    else:
+      data['hooks'] = json.dumps([])
   except Exception as e:
     print(f"Error extracting hooks: {e}")
     data['hooks'] = json.dumps([])
   
-  # Debug output
-  print(f"Parsed character data: {data}")
+  # Debug output to help troubleshoot
+  print(f"=== CHARACTER PARSING DEBUG ===")
+  print(f"Found {len(soup_obj.find_all())} total elements")
+  print(f"Found {len(soup_obj.find_all('pfield'))} pfield elements")
+  print(f"Found {len(soup_obj.find_all('img'))} img elements")
+  print(f"Parsed data: {data}")
+  print("==============================")
   
   return data
 

@@ -187,14 +187,36 @@ async def handle_character(message):
     cache_key = f'character:{character}'
     character_data = helpers.check_cache(cache_key)
     
+    print(f"=== CHARACTER COMMAND DEBUG ===")
+    print(f"Looking for character: '{character}'")
+    print(f"Cache key: '{cache_key}'")
+    print(f"Cache hit: {character_data is not None}")
+    
     if character_data:
         converted_data = helpers.convert_to_strings(character_data)
+        print(f"Using cached data: {converted_data}")
         embed = characters.character_embed(character, converted_data)
         await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
     else:
-        # Cache miss
+        # Cache miss - fetch from database
+        if character not in db:
+            await message.channel.send(f"Character '{character}' not found in database")
+            return
+            
         db_character = db[character]
-        soup = helpers.soup(db_character['profile'])
+        print(f"DB character data: {db_character}")
+        
+        # Fetch the profile page
+        profile_url = db_character['profile']
+        print(f"Fetching profile from: {profile_url}")
+        
+        try:
+            soup = helpers.soup(profile_url)
+            print(f"Soup fetched successfully, length: {len(str(soup))}")
+        except Exception as e:
+            print(f"Error fetching soup: {e}")
+            await message.channel.send(f"Error fetching profile for {character}: {str(e)}")
+            return
         
         if character == "the many-faced god":
             data = build_character_data(soup, None, db_character['profile'])
@@ -205,13 +227,16 @@ async def handle_character(message):
             try:
                 player = await client.fetch_user(db_character['player'])
                 data = build_character_data(soup, player, db_character['profile'])
-            except:
+            except Exception as e:
+                print(f"Error fetching player: {e}")
                 data = build_character_data(soup, None, db_character['profile'])
                 data['player_name'] = "Unknown Player"
         
+        print(f"Final character data: {data}")
         helpers.write_to_cache(cache_key, data)
         embed = characters.character_embed(character, data)
         await helpers.send_embed(client, CHANNELS['plot_hooks'], embed)
+    print("===============================")
 
 async def handle_activity(message):
     await message.channel.send("Building your activity report… one moment.")
