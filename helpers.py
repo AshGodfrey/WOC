@@ -117,23 +117,41 @@ def parse_character_from_soup(soup_obj):
         # Only look in the first part of the content to avoid CSS
         text_content = text_content[:5000]
         
-      # More specific patterns to extract just the value after the label
-      patterns = [
-        rf'{field_id}\s*[:]\s*([^\n]+)',  # "field: value"
-        rf'{field_id}\s+([^\n]+)',       # "field value" (space separated)
-        rf'{field_id}([^\n\s][^\n]*)'    # "fieldvalue" (concatenated)
-      ]
-      
-      for pattern in patterns:
-        match = re.search(pattern, text_content, re.IGNORECASE)
-        if match:
-          field_value = match.group(1).strip()
-          # Clean up common prefixes that might be left
-          field_value = re.sub(rf'^{field_id}\s*[:]*\s*', '', field_value, flags=re.IGNORECASE).strip()
-          # Only use if it's reasonable length and doesn't look like CSS
-          if len(field_value) < 100 and field_value and not any(css_term in field_value.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:', '{', '}', 'px', 'em', 'rem']):
-            data[field_key] = field_value
-            break
+      # Special handling for age field to extract just the number
+      if field_id == 'age':
+        # Look for age patterns like "years of age26" or "age26" and extract just the number
+        age_patterns = [
+          r'years\s+of\s+age\s*(\d+)',  # "years of age 26"
+          r'age\s*(\d+)',               # "age 26"
+          r'(\d+)\s+years',             # "26 years"
+          r'\b(\d+)\b'                  # any standalone number
+        ]
+        
+        for age_pattern in age_patterns:
+          age_match = re.search(age_pattern, text_content, re.IGNORECASE)
+          if age_match:
+            age_value = age_match.group(1).strip()
+            if age_value and age_value.isdigit():
+              data[field_key] = age_value
+              break
+      else:
+        # More specific patterns to extract just the value after the label
+        patterns = [
+          rf'{field_id}\s*[:]\s*([^\n]+)',  # "field: value"
+          rf'{field_id}\s+([^\n]+)',       # "field value" (space separated)
+          rf'{field_id}([^\n\s][^\n]*)'    # "fieldvalue" (concatenated)
+        ]
+        
+        for pattern in patterns:
+          match = re.search(pattern, text_content, re.IGNORECASE)
+          if match:
+            field_value = match.group(1).strip()
+            # Clean up common prefixes that might be left
+            field_value = re.sub(rf'^{field_id}\s*[:]*\s*', '', field_value, flags=re.IGNORECASE).strip()
+            # Only use if it's reasonable length and doesn't look like CSS
+            if len(field_value) < 100 and field_value and not any(css_term in field_value.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:', '{', '}', 'px', 'em', 'rem']):
+              data[field_key] = field_value
+              break
           
     except Exception as e:
       print(f"Error extracting {field_key}: {e}")
