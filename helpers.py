@@ -101,9 +101,11 @@ def parse_character_from_soup(soup_obj):
       field_by_id = soup_obj.find(id=field_id)
       if field_by_id:
         field_text = field_by_id.get_text(strip=True)
+        # Remove the field label from the text
+        clean_text = field_text.replace(field_id, '').strip()
         # Limit field text length to avoid CSS pollution
-        if len(field_text) < 100:
-          data[field_key] = field_text
+        if len(clean_text) < 100 and clean_text:
+          data[field_key] = clean_text
           continue
       
       # Method 2: Look for field labels and extract following content
@@ -115,13 +117,23 @@ def parse_character_from_soup(soup_obj):
         # Only look in the first part of the content to avoid CSS
         text_content = text_content[:5000]
         
-      pattern = rf'{field_id}\s*:?\s*([^\n]+)'
-      match = re.search(pattern, text_content, re.IGNORECASE)
-      if match:
-        field_value = match.group(1).strip()
-        # Only use if it's reasonable length and doesn't look like CSS
-        if len(field_value) < 100 and not any(css_term in field_value.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:', '{', '}', 'px', 'em', 'rem']):
-          data[field_key] = field_value
+      # More specific patterns to extract just the value after the label
+      patterns = [
+        rf'{field_id}\s*[:]\s*([^\n]+)',  # "field: value"
+        rf'{field_id}\s+([^\n]+)',       # "field value" (space separated)
+        rf'{field_id}([^\n\s][^\n]*)'    # "fieldvalue" (concatenated)
+      ]
+      
+      for pattern in patterns:
+        match = re.search(pattern, text_content, re.IGNORECASE)
+        if match:
+          field_value = match.group(1).strip()
+          # Clean up common prefixes that might be left
+          field_value = re.sub(rf'^{field_id}\s*[:]*\s*', '', field_value, flags=re.IGNORECASE).strip()
+          # Only use if it's reasonable length and doesn't look like CSS
+          if len(field_value) < 100 and field_value and not any(css_term in field_value.lower() for css_term in ['color:', 'background:', 'font-', 'margin:', 'padding:', 'border:', '{', '}', 'px', 'em', 'rem']):
+            data[field_key] = field_value
+            break
           
     except Exception as e:
       print(f"Error extracting {field_key}: {e}")
